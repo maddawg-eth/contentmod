@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid two">
+  <section class="card">
+    <h2>Monitored person</h2>
+    <form method="post" action="/dashboard/profile">
+      <label>Full name</label>
+      <input name="full_name" value="{{ profile.full_name if profile else '' }}" required>
+      <label>Aliases (one per line)</label>
+      <textarea name="aliases">{% if profile %}{% for a in profile.aliases %}{{ a.alias }}
+{% endfor %}{% endif %}</textarea>
+      <label>Handles (one per line)</label>
+      <textarea name="handles">{% if profile %}{% for h in profile.handles %}{{ h.handle }}
+{% endfor %}{% endif %}</textarea>
+      <label>Description</label>
+      <textarea name="description">{{ profile.description if profile and profile.description else '' }}</textarea>
+      <button type="submit">Save profile</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Discovery</h2>
+    <form method="post" action="/dashboard/discover">
+      <label><input type="checkbox" name="platforms" value="youtube" checked> YouTube</label>
+      <label><input type="checkbox" name="platforms" value="x" checked> X</label>
+      <label>Max candidates per query</label>
+      <input type="number" name="max_candidates_per_query" value="10" min="1" max="50">
+      <button type="submit">Run discovery</button>
+    </form>
+
+    <hr>
+    <h3>Add manual candidate</h3>
+    <form method="post" action="/dashboard/manual-candidate">
+      <label>Platform</label>
+      <input name="platform" placeholder="x, youtube, tiktok" required>
+      <label>External ID</label>
+      <input name="external_id" required>
+      <label>URL</label>
+      <input name="url" required>
+      <label>Title</label>
+      <input name="title">
+      <label>Account name</label>
+      <input name="account_name">
+      <label>Description</label>
+      <textarea name="description"></textarea>
+      <button type="submit">Add candidate</button>
+    </form>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Candidates</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Platform</th>
+        <th>Title</th>
+        <th>Account</th>
+        <th>Media</th>
+        <th>Review</th>
+        <th>Latest analysis</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><a href="/candidates/{{ row.candidate.id }}">{{ row.candidate.id }}</a></td>
+        <td>{{ row.candidate.platform }}</td>
+        <td><a href="{{ row.candidate.url }}" target="_blank" rel="noreferrer">{{ row.candidate.title or row.candidate.url }}</a></td>
+        <td>{{ row.candidate.account_name or '' }}</td>
+        <td>{% if row.candidate.media_path %}uploaded{% else %}missing{% endif %}</td>
+        <td><span class="badge badge-{{ row.candidate.review_status }}">{{ row.candidate.review_status }}</span></td>
+        <td>
+          {% if row.latest %}
+            <span class="badge badge-{{ row.latest.risk_label or row.latest.status }}">{{ row.latest.risk_label or row.latest.status }}</span>
+            {% if row.latest.risk_score is not none %}
+              {{ '%.2f'|format(row.latest.risk_score) }}
+            {% endif %}
+          {% else %}
+            none
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

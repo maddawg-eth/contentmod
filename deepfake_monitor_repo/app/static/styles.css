@@ -1,0 +1,64 @@
+:root {
+  --bg: #0b1020;
+  --card: #151d35;
+  --text: #eef3ff;
+  --muted: #a7b3d1;
+  --border: #2c3960;
+  --accent: #78a7ff;
+  --good: #35c46b;
+  --warn: #ffbb38;
+  --bad: #ff6b6b;
+}
+body {
+  margin: 0;
+  font-family: Inter, system-ui, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+a { color: var(--accent); }
+.container { max-width: 1200px; margin: 0 auto; padding: 1.25rem; }
+.topbar { border-bottom: 1px solid var(--border); background: rgba(0,0,0,.2); }
+.subtitle { color: var(--muted); margin-top: -.5rem; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.grid.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 900px) { .grid.two { grid-template-columns: 1fr; } }
+label { display: block; margin-top: .75rem; margin-bottom: .25rem; color: var(--muted); }
+input, textarea, select, button {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0e1529;
+  color: var(--text);
+  padding: .7rem;
+}
+textarea { min-height: 100px; }
+button { margin-top: .9rem; cursor: pointer; background: #1b2950; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border-top: 1px solid var(--border); padding: .75rem; text-align: left; vertical-align: top; }
+.badge {
+  display: inline-block;
+  padding: .2rem .5rem;
+  border-radius: 999px;
+  font-size: .85rem;
+  border: 1px solid var(--border);
+}
+.badge-low, .badge-cleared, .badge-completed { background: rgba(53,196,107,.12); color: #8ef1b1; }
+.badge-medium, .badge-watch, .badge-running, .badge-pending, .badge-queued { background: rgba(255,187,56,.12); color: #ffd26f; }
+.badge-high, .badge-confirmed_fake, .badge-failed { background: rgba(255,107,107,.12); color: #ff9f9f; }
+pre {
+  white-space: pre-wrap;
+  background: #0e1529;
+  border: 1px solid var(--border);
+  padding: .8rem;
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.analysis { border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 1rem; }
