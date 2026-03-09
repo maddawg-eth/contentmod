@@ -1,7 +1,10 @@
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 from app.db import Base, engine
-from app import models  # noqa: F401
+import app.models  # noqa: F401
 
-
-if __name__ == "__main__":
-    Base.metadata.create_all(bind=engine)
-    print("Database initialized.")
+Base.metadata.create_all(bind=engine)
+print("Database tables created")
