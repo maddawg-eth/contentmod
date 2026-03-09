@@ -1,89 +1,108 @@
-{% extends "base.html" %}
-{% block content %}
-<div class="grid two">
-  <section class="card">
-    <h2>Monitored person</h2>
-    <form method="post" action="/dashboard/profile">
-      <label>Full name</label>
-      <input name="full_name" value="{{ profile.full_name if profile else '' }}" required>
-      <label>Aliases (one per line)</label>
-      <textarea name="aliases">{% if profile %}{% for a in profile.aliases %}{{ a.alias }}
-{% endfor %}{% endif %}</textarea>
-      <label>Handles (one per line)</label>
-      <textarea name="handles">{% if profile %}{% for h in profile.handles %}{{ h.handle }}
-{% endfor %}{% endif %}</textarea>
-      <label>Description</label>
-      <textarea name="description">{{ profile.description if profile and profile.description else '' }}</textarea>
-      <button type="submit">Save profile</button>
-    </form>
-  </section>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Deepfake Monitor Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+    th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
+    th { background: #f3f3f3; text-align: left; }
+    .row { display: flex; gap: 24px; align-items: flex-start; }
+    .card { border: 1px solid #ddd; padding: 16px; width: 48%; }
+    .high { background: #ffe0e0; }
+    .medium { background: #fff4db; }
+    .low { background: #edf7ed; }
+  </style>
+</head>
+<body>
+  <h1>Deepfake Monitor Dashboard</h1>
 
-  <section class="card">
-    <h2>Discovery</h2>
-    <form method="post" action="/dashboard/discover">
-      <label><input type="checkbox" name="platforms" value="youtube" checked> YouTube</label>
-      <label><input type="checkbox" name="platforms" value="x" checked> X</label>
-      <label>Max candidates per query</label>
-      <input type="number" name="max_candidates_per_query" value="10" min="1" max="50">
-      <button type="submit">Run discovery</button>
-    </form>
+  <form method="post" action="/admin/run-now">
+    <button type="submit">Run monitors now</button>
+  </form>
 
-    <hr>
-    <h3>Add manual candidate</h3>
-    <form method="post" action="/dashboard/manual-candidate">
-      <label>Platform</label>
-      <input name="platform" placeholder="x, youtube, tiktok" required>
-      <label>External ID</label>
-      <input name="external_id" required>
-      <label>URL</label>
-      <input name="url" required>
-      <label>Title</label>
-      <input name="title">
-      <label>Account name</label>
-      <input name="account_name">
-      <label>Description</label>
-      <textarea name="description"></textarea>
-      <button type="submit">Add candidate</button>
-    </form>
-  </section>
-</div>
+  <div class="row">
+    <div class="card">
+      <h2>Add monitored person</h2>
+      <form method="post" action="/admin/monitor">
+        <p><input name="full_name" placeholder="Full name" style="width:100%" required></p>
+        <p><input name="aliases_csv" placeholder="Aliases CSV" style="width:100%"></p>
+        <p><input name="reference_accounts_csv" placeholder="Reference accounts CSV (@handle1, @handle2)" style="width:100%"></p>
+        <p><input name="reference_images_csv" placeholder="Reference image paths CSV" style="width:100%"></p>
+        <p><input name="reference_audio_csv" placeholder="Reference audio paths CSV" style="width:100%"></p>
+        <p><button type="submit">Save monitor</button></p>
+      </form>
+    </div>
 
-<section class="card">
-  <h2>Candidates</h2>
+    <div class="card">
+      <h2>Add alert recipient</h2>
+      <form method="post" action="/admin/recipient">
+        <p>
+          <select name="person_id" style="width:100%" required>
+            {% for p in people %}
+            <option value="{{ p.id }}">{{ p.full_name }}</option>
+            {% endfor %}
+          </select>
+        </p>
+        <p><input name="name" placeholder="Recipient name" style="width:100%" required></p>
+        <p><input name="email" placeholder="Email" style="width:100%"></p>
+        <p><input name="phone_e164" placeholder="+15551234567" style="width:100%"></p>
+        <p>
+          <label><input type="checkbox" name="send_email" value="true"> Email alerts</label>
+          <label><input type="checkbox" name="send_sms" value="true"> SMS alerts</label>
+        </p>
+        <p><button type="submit">Save recipient</button></p>
+      </form>
+    </div>
+  </div>
+
+  <h2>Monitored people</h2>
   <table>
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Platform</th>
-        <th>Title</th>
-        <th>Account</th>
-        <th>Media</th>
-        <th>Review</th>
-        <th>Latest analysis</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in rows %}
-      <tr>
-        <td><a href="/candidates/{{ row.candidate.id }}">{{ row.candidate.id }}</a></td>
-        <td>{{ row.candidate.platform }}</td>
-        <td><a href="{{ row.candidate.url }}" target="_blank" rel="noreferrer">{{ row.candidate.title or row.candidate.url }}</a></td>
-        <td>{{ row.candidate.account_name or '' }}</td>
-        <td>{% if row.candidate.media_path %}uploaded{% else %}missing{% endif %}</td>
-        <td><span class="badge badge-{{ row.candidate.review_status }}">{{ row.candidate.review_status }}</span></td>
-        <td>
-          {% if row.latest %}
-            <span class="badge badge-{{ row.latest.risk_label or row.latest.status }}">{{ row.latest.risk_label or row.latest.status }}</span>
-            {% if row.latest.risk_score is not none %}
-              {{ '%.2f'|format(row.latest.risk_score) }}
-            {% endif %}
-          {% else %}
-            none
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>Aliases</th>
+      <th>Reference accounts</th>
+      <th>Active</th>
+    </tr>
+    {% for p in people %}
+    <tr>
+      <td>{{ p.id }}</td>
+      <td>{{ p.full_name }}</td>
+      <td>{{ p.aliases }}</td>
+      <td>{{ p.reference_accounts }}</td>
+      <td>{{ p.is_active }}</td>
+    </tr>
+    {% endfor %}
   </table>
-</section>
-{% endblock %}
+
+  <h2>Latest candidates</h2>
+  <table>
+    <tr>
+      <th>Target</th>
+      <th>Platform</th>
+      <th>Account</th>
+      <th>Title</th>
+      <th>Risk</th>
+      <th>Viral</th>
+      <th>Reason</th>
+      <th>Alerted</th>
+      <th>URL</th>
+    </tr>
+    {% for c in candidates %}
+    <tr class="{{ c.risk_label }}">
+      <td>{{ c.person.full_name }}</td>
+      <td>{{ c.platform }}</td>
+      <td>{{ c.account_name }}</td>
+      <td>{{ c.title }}</td>
+      <td>{{ c.risk_score }} ({{ c.risk_label }})</td>
+      <td>{{ c.viral_score }}</td>
+      <td>{{ c.discovery_reason }}</td>
+      <td>{{ c.alert_sent }}</td>
+      <td><a href="{{ c.url }}" target="_blank">open</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</body>
+</html>
