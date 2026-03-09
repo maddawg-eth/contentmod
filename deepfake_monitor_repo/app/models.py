@@ -1,102 +1,103 @@
 from __future__ import annotations
 
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DateTime,
+    Boolean,
+    Float,
+    ForeignKey,
+    Text,
+    JSON,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
 from app.db import Base
 
 
-class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+class MonitoredPerson(Base):
+    __tablename__ = "monitored_people"
+
+    id = Column(Integer, primary_key=True)
+    full_name = Column(String, nullable=False)
+    aliases = Column(JSON, nullable=False, default=list)
+    reference_accounts = Column(JSON, nullable=False, default=list)
+    reference_image_paths = Column(JSON, nullable=False, default=list)
+    reference_audio_paths = Column(JSON, nullable=False, default=list)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    candidates = relationship("Candidate", back_populates="person", cascade="all, delete-orphan")
+    alert_recipients = relationship("AlertRecipient", back_populates="person", cascade="all, delete-orphan")
 
 
-class MonitoredProfile(TimestampMixin, Base):
-    __tablename__ = "monitored_profiles"
+class Candidate(Base):
+    __tablename__ = "candidates"
+    __table_args__ = (
+        UniqueConstraint("person_id", "platform", "external_id", name="uq_person_platform_external"),
+    )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    id = Column(Integer, primary_key=True)
+    person_id = Column(Integer, ForeignKey("monitored_people.id"), nullable=False)
 
-    aliases: Mapped[list[ProfileAlias]] = relationship(back_populates="profile", cascade="all, delete-orphan")
-    handles: Mapped[list[ProfileHandle]] = relationship(back_populates="profile", cascade="all, delete-orphan")
-    references: Mapped[list[ReferenceMedia]] = relationship(back_populates="profile", cascade="all, delete-orphan")
-    candidates: Mapped[list[CandidateVideo]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+    platform = Column(String, nullable=False)
+    external_id = Column(String, nullable=False)
+    url = Column(String, nullable=False)
+    account_name = Column(String)
+    title = Column(Text)
+    body_text = Column(Text)
+    posted_at = Column(DateTime(timezone=True))
+    transcript = Column(Text)
+    media_path = Column(Text)
 
+    discovery_reason = Column(String)
 
-class ProfileAlias(TimestampMixin, Base):
-    __tablename__ = "profile_aliases"
-    __table_args__ = (UniqueConstraint("profile_id", "alias", name="uq_profile_alias"),)
+    face_match_score = Column(Float)
+    voice_match_score = Column(Float)
+    synthetic_face_score = Column(Float)
+    synthetic_voice_score = Column(Float)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    profile_id: Mapped[int] = mapped_column(ForeignKey("monitored_profiles.id", ondelete="CASCADE"), nullable=False)
-    alias: Mapped[str] = mapped_column(String(255), nullable=False)
+    viral_score = Column(Float)
+    risk_score = Column(Float)
+    risk_label = Column(String)
 
-    profile: Mapped[MonitoredProfile] = relationship(back_populates="aliases")
+    review_status = Column(String, default="new")
+    alert_sent = Column(Boolean, default=False)
 
+    raw_metrics = Column(JSON, default=dict)
+    raw_payload = Column(JSON, default=dict)
 
-class ProfileHandle(TimestampMixin, Base):
-    __tablename__ = "profile_handles"
-    __table_args__ = (UniqueConstraint("profile_id", "handle", name="uq_profile_handle"),)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    profile_id: Mapped[int] = mapped_column(ForeignKey("monitored_profiles.id", ondelete="CASCADE"), nullable=False)
-    handle: Mapped[str] = mapped_column(String(255), nullable=False)
-    platform: Mapped[str | None] = mapped_column(String(50), nullable=True)
-
-    profile: Mapped[MonitoredProfile] = relationship(back_populates="handles")
-
-
-class ReferenceMedia(TimestampMixin, Base):
-    __tablename__ = "reference_media"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    profile_id: Mapped[int] = mapped_column(ForeignKey("monitored_profiles.id", ondelete="CASCADE"), nullable=False)
-    media_type: Mapped[str] = mapped_column(String(20), nullable=False)  # image/audio
-    file_path: Mapped[str] = mapped_column(Text, nullable=False)
-    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
-
-    profile: Mapped[MonitoredProfile] = relationship(back_populates="references")
+    person = relationship("MonitoredPerson", back_populates="candidates")
 
 
-class CandidateVideo(TimestampMixin, Base):
-    __tablename__ = "candidate_videos"
-    __table_args__ = (UniqueConstraint("platform", "external_id", name="uq_candidate_platform_external"),)
+class AlertRecipient(Base):
+    __tablename__ = "alert_recipients"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    profile_id: Mapped[int] = mapped_column(ForeignKey("monitored_profiles.id", ondelete="CASCADE"), nullable=False)
-    platform: Mapped[str] = mapped_column(String(50), nullable=False)
-    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    url: Mapped[str] = mapped_column(Text, nullable=False)
-    title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    account_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    posted_at_raw: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    media_path: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_query: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    review_status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False)
-    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id = Column(Integer, primary_key=True)
+    person_id = Column(Integer, ForeignKey("monitored_people.id"), nullable=False)
 
-    profile: Mapped[MonitoredProfile] = relationship(back_populates="candidates")
-    analyses: Mapped[list[AnalysisResult]] = relationship(back_populates="candidate", cascade="all, delete-orphan")
+    name = Column(String, nullable=False)
+    email = Column(String)
+    phone_e164 = Column(String)
+    send_email = Column(Boolean, default=True)
+    send_sms = Column(Boolean, default=False)
+    min_risk_threshold = Column(Float, default=0.70)
+    min_viral_threshold = Column(Float, default=0.60)
+
+    person = relationship("MonitoredPerson", back_populates="alert_recipients")
 
 
-class AnalysisResult(TimestampMixin, Base):
-    __tablename__ = "analysis_results"
+class MonitorRun(Base):
+    __tablename__ = "monitor_runs"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    candidate_id: Mapped[int] = mapped_column(ForeignKey("candidate_videos.id", ondelete="CASCADE"), nullable=False)
-    task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    status: Mapped[str] = mapped_column(String(30), default="queued", nullable=False)
-    risk_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    risk_label: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    identity_match: Mapped[float | None] = mapped_column(Float, nullable=True)
-    best_face_match: Mapped[float | None] = mapped_column(Float, nullable=True)
-    transcript_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    ocr_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    provenance_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    components_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    candidate: Mapped[CandidateVideo] = relationship(back_populates="analyses")
+    id = Column(Integer, primary_key=True)
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    finished_at = Column(DateTime(timezone=True))
+    status = Column(String, default="running")
+    notes = Column(Text)
