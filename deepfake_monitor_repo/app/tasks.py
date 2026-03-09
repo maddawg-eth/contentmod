@@ -1,82 +1,116 @@
 from __future__ import annotations
 
-import json
-import os
 from celery import Celery
-from sqlalchemy import desc, select
+from celery.schedules import crontab
+
 from app.config import settings
-from app.db import SessionLocal
-from app.media import candidate_media_dir, extract_audio, extract_keyframes, ocr_text_from_image, transcribe_audio
-from app.identity import best_face_match_score, build_reference_face_gallery
-from app.models import AnalysisResult, CandidateVideo, MonitoredProfile, ReferenceMedia
-from app.provenance import check_provenance
-from app.scoring import final_score, text_identity_score
+
+celery_app = Celery("deepfake_agent", broker=settings.redis_url, backend=settings.redis_url)
+
+celery_app.conf.beat_schedule = {
+    "run-all-monitors-every-10-minutes": {
+        "task": "app.tasks.run_all_monitors",
+        "schedule": crontab(minute="*/10"),
+    }
+}
 
 
-celery_app = Celery("deepfake_monitor", broker=settings.redis_url, backend=settings.redis_url)
-celery_app.conf.task_routes = {"app.tasks.run_candidate_analysis": {"queue": "analysis"}}
+@celery_app.task(name="app.tasks.run_all_monitors")
+def run_all_monitors():
+    from app.monitor import run_all_monitors_once
+    return run_all_monitors_once()
 
 
-@celery_app.task(name="app.tasks.run_candidate_analysis")
-def run_candidate_analysis(candidate_id: int, analysis_id: int) -> dict:
+@celery_app.task(name="app.tasks.analyze_candidate")
+def analyze_candidate(person_id: int, candidate_payload: dict):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.alerts import notify_recipients
+    from app.db import SessionLocal
+    from app.models import Candidate, MonitoredPerson
+    from app.services.virality import compute_viral_score
+    from app.verification.face import verify_face_on_candidate
+    from app.verification.risk import compute_final_risk
+    from app.verification.voice import verify_voice_on_candidate
+
     db = SessionLocal()
     try:
-        candidate = db.get(CandidateVideo, candidate_id)
-        analysis = db.get(AnalysisResult, analysis_id)
-        if candidate is None or analysis is None:
-            return {"error": "Candidate or analysis not found"}
-        if not candidate.media_path or not os.path.exists(candidate.media_path):
-            analysis.status = "failed"
-            analysis.error_message = "No uploaded local media file found for candidate."
-            db.commit()
-            return {"error": analysis.error_message}
+        person = db.query(MonitoredPerson).filter(MonitoredPerson.id == person_id).first()
+        if not person:
+            return {"error": "person_not_found"}
 
-        profile = db.get(MonitoredProfile, candidate.profile_id)
-        refs = db.execute(select(ReferenceMedia).where(ReferenceMedia.profile_id == candidate.profile_id, ReferenceMedia.media_type == "image")).scalars().all()
-        gallery = build_reference_face_gallery([r.file_path for r in refs])
-
-        work_dir = candidate_media_dir(candidate_id) / "analysis"
-        os.makedirs(work_dir, exist_ok=True)
-
-        analysis.status = "running"
-        db.commit()
-
-        frames = extract_keyframes(candidate.media_path, str(work_dir / "frames"))
-        audio_path = extract_audio(candidate.media_path, str(work_dir / "audio.wav"))
-        transcript = transcribe_audio(audio_path)
-        ocr_text = " ".join(ocr_text_from_image(frame) for frame in frames[:10])
-        face_scores = [best_face_match_score(frame, gallery) for frame in frames[:10]] if frames else [0.0]
-        best_face = max(face_scores) if face_scores else 0.0
-
-        identity_match = max(
-            best_face,
-            text_identity_score(
-                profile.full_name if profile else "",
-                [a.alias for a in profile.aliases] if profile else [],
-                [candidate.title or "", candidate.description or "", transcript, ocr_text],
+        existing = (
+            db.query(Candidate)
+            .filter(
+                Candidate.person_id == person.id,
+                Candidate.platform == candidate_payload["platform"],
+                Candidate.external_id == candidate_payload["external_id"],
             )
+            .first()
         )
-        provenance = check_provenance(candidate.media_path)
-        result = final_score(identity_match, best_face, transcript, provenance, candidate.account_name)
+        if existing:
+            return {"status": "duplicate", "candidate_id": existing.id}
 
-        analysis.status = "completed"
-        analysis.risk_score = result["score"]
-        analysis.risk_label = result["label"]
-        analysis.identity_match = identity_match
-        analysis.best_face_match = best_face
-        analysis.transcript_excerpt = transcript[:2000]
-        analysis.ocr_excerpt = ocr_text[:2000]
-        analysis.provenance_json = json.dumps(provenance)
-        analysis.components_json = json.dumps(result["components"])
+        media_path = candidate_payload.get("media_path")
+
+        face_match_score = None
+        voice = {
+            "speaker_match_score": None,
+            "synthetic_voice_score": None,
+            "voice_clone_risk": None,
+        }
+
+        if media_path:
+            face_match_score = verify_face_on_candidate(media_path, person.reference_image_paths or [])
+            voice = verify_voice_on_candidate(media_path, person.reference_audio_paths or [])
+
+        viral_score = compute_viral_score(candidate_payload.get("raw_metrics", {}))
+
+        result = compute_final_risk(
+            title=candidate_payload.get("title", ""),
+            body_text=candidate_payload.get("description", ""),
+            transcript=candidate_payload.get("transcript", ""),
+            face_match_score=face_match_score,
+            voice_match_score=voice.get("speaker_match_score"),
+            synthetic_voice_score=voice.get("voice_clone_risk"),
+            viral_score=viral_score,
+        )
+
+        row = Candidate(
+            person_id=person.id,
+            platform=candidate_payload["platform"],
+            external_id=candidate_payload["external_id"],
+            url=candidate_payload["url"],
+            account_name=candidate_payload.get("account_name"),
+            title=candidate_payload.get("title"),
+            body_text=candidate_payload.get("description"),
+            posted_at=None,
+            transcript=candidate_payload.get("transcript"),
+            media_path=media_path,
+            discovery_reason=candidate_payload.get("discovery_reason"),
+            face_match_score=face_match_score,
+            voice_match_score=voice.get("speaker_match_score"),
+            synthetic_face_score=None,
+            synthetic_voice_score=voice.get("voice_clone_risk"),
+            viral_score=viral_score,
+            risk_score=result["score"],
+            risk_label=result["label"],
+            raw_metrics=candidate_payload.get("raw_metrics", {}),
+            raw_payload=candidate_payload.get("raw_payload", {}),
+        )
+
+        db.add(row)
         db.commit()
+        db.refresh(row)
 
-        return {"analysis_id": analysis_id, "result": result}
-    except Exception as exc:  # pragma: no cover
-        analysis = db.get(AnalysisResult, analysis_id)
-        if analysis:
-            analysis.status = "failed"
-            analysis.error_message = str(exc)
+        if result["should_alert"]:
+            notify_recipients(db, person, row)
+            row.alert_sent = True
             db.commit()
-        raise
+
+        return {"candidate_id": row.id, "risk": row.risk_score}
+    except IntegrityError:
+        db.rollback()
+        return {"status": "duplicate"}
     finally:
         db.close()
